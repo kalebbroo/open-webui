@@ -20,6 +20,12 @@ from open_webui.utils.images.comfyui import (
     ComfyUIWorkflow,
     comfyui_generate_image,
 )
+from open_webui.utils.images.swarmui import (
+    SwarmUIGenerateImageForm,
+    SwarmUIWorkflow,
+    swarmui_generate_image,
+    list_swarmui_models
+)
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -55,6 +61,12 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
         },
+        "swarmui": {
+            "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
+            "SWARMUI_API_KEY": request.app.state.config.SWARMUI_API_KEY,
+            "SWARMUI_WORKFLOW": request.app.state.config.SWARMUI_WORKFLOW,
+            "SWARMUI_WORKFLOW_NODES": request.app.state.config.SWARMUI_WORKFLOW_NODES,
+        },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
             "GEMINI_API_KEY": request.app.state.config.IMAGES_GEMINI_API_KEY,
@@ -82,6 +94,13 @@ class ComfyUIConfigForm(BaseModel):
     COMFYUI_WORKFLOW_NODES: list[dict]
 
 
+class SwarmUIConfigForm(BaseModel):
+    SWARMUI_BASE_URL: str
+    SWARMUI_API_KEY: str
+    SWARMUI_WORKFLOW: str
+    SWARMUI_WORKFLOW_NODES: list[dict]
+
+
 class GeminiConfigForm(BaseModel):
     GEMINI_API_BASE_URL: str
     GEMINI_API_KEY: str
@@ -94,6 +113,7 @@ class ConfigForm(BaseModel):
     openai: OpenAIConfigForm
     automatic1111: Automatic1111ConfigForm
     comfyui: ComfyUIConfigForm
+    swarmui: SwarmUIConfigForm
     gemini: GeminiConfigForm
 
 
@@ -145,10 +165,18 @@ async def update_config(
         form_data.comfyui.COMFYUI_BASE_URL.strip("/")
     )
     request.app.state.config.COMFYUI_API_KEY = form_data.comfyui.COMFYUI_API_KEY
-
     request.app.state.config.COMFYUI_WORKFLOW = form_data.comfyui.COMFYUI_WORKFLOW
     request.app.state.config.COMFYUI_WORKFLOW_NODES = (
         form_data.comfyui.COMFYUI_WORKFLOW_NODES
+    )
+
+    request.app.state.config.SWARMUI_BASE_URL = (
+        form_data.swarmui.SWARMUI_BASE_URL.strip("/")
+    )
+    request.app.state.config.SWARMUI_API_KEY = form_data.swarmui.SWARMUI_API_KEY
+    request.app.state.config.SWARMUI_WORKFLOW = form_data.swarmui.SWARMUI_WORKFLOW
+    request.app.state.config.SWARMUI_WORKFLOW_NODES = (
+        form_data.swarmui.SWARMUI_WORKFLOW_NODES
     )
 
     return {
@@ -171,6 +199,12 @@ async def update_config(
             "COMFYUI_API_KEY": request.app.state.config.COMFYUI_API_KEY,
             "COMFYUI_WORKFLOW": request.app.state.config.COMFYUI_WORKFLOW,
             "COMFYUI_WORKFLOW_NODES": request.app.state.config.COMFYUI_WORKFLOW_NODES,
+        },
+        "swarmui": {
+            "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
+            "SWARMUI_API_KEY": request.app.state.config.SWARMUI_API_KEY,
+            "SWARMUI_WORKFLOW": request.app.state.config.SWARMUI_WORKFLOW,
+            "SWARMUI_WORKFLOW_NODES": request.app.state.config.SWARMUI_WORKFLOW_NODES,
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
@@ -215,6 +249,24 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
         try:
             r = requests.get(
                 url=f"{request.app.state.config.COMFYUI_BASE_URL}/object_info",
+                headers=headers,
+            )
+            r.raise_for_status()
+            return True
+        except Exception:
+            request.app.state.config.ENABLE_IMAGE_GENERATION = False
+            raise HTTPException(status_code=400, detail=ERROR_MESSAGES.INVALID_URL)
+    elif request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
+
+        headers = None
+        if request.app.state.config.SWARMUI_API_KEY:
+            headers = {
+                "Authorization": f"Bearer {request.app.state.config.SWARMUI_API_KEY}"
+            }
+
+        try:
+            r = requests.get(
+                url=f"{request.app.state.config.SWARMUI_BASE_URL}/object_info",
                 headers=headers,
             )
             r.raise_for_status()
@@ -387,6 +439,18 @@ def get_models(request: Request, user=Depends(get_verified_user)):
                         ][0],
                     )
                 )
+        elif request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
+            # Use SwarmUI's /API/ListModels endpoint
+            from open_webui.utils.images.swarmui import list_swarmui_models
+            base_url = request.app.state.config.SWARMUI_BASE_URL
+            api_key = request.app.state.config.SWARMUI_API_KEY
+            # Use root path, depth=1, subtype=Stable-Diffusion for now
+            models = list_swarmui_models(base_url, api_key)
+            # Format as list of dicts with id and name
+            return [
+                {"id": model["name"], "name": model.get("name", model["name"])}
+                for model in models
+            ]
         elif (
             request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"
             or request.app.state.config.IMAGE_GENERATION_ENGINE == ""
@@ -405,14 +469,6 @@ def get_models(request: Request, user=Depends(get_verified_user)):
     except Exception as e:
         request.app.state.config.ENABLE_IMAGE_GENERATION = False
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(e))
-
-
-class GenerateImageForm(BaseModel):
-    model: Optional[str] = None
-    prompt: str
-    size: Optional[str] = None
-    n: int = 1
-    negative_prompt: Optional[str] = None
 
 
 def load_b64_image_data(b64_str):
@@ -614,6 +670,26 @@ async def image_generations(
                 )
                 images.append({"url": url})
             return images
+
+        elif request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
+            # SwarmUI: mimic comfyui logic but call SwarmUI
+            res = swarmui_generate_image(
+                request.app.state.config.IMAGE_GENERATION_MODEL,
+                form_data,
+                user.id,
+                request.app.state.config.SWARMUI_BASE_URL,
+                request.app.state.config.SWARMUI_API_KEY,
+            )
+            log.debug(f"SwarmUI res: {res}")
+            images = []
+            for image in res.get("data", []):
+                headers = None
+                if request.app.state.config.SWARMUI_API_KEY:
+                    headers = {"Authorization": f"Bearer {request.app.state.config.SWARMUI_API_KEY}"}
+                # If image is a data URL, decode. If image is a URL, fetch as needed or just return.
+                images.append(image["url"])
+            return {"images": images}
+
         elif (
             request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"
             or request.app.state.config.IMAGE_GENERATION_ENGINE == ""

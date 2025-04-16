@@ -97,6 +97,14 @@
 		}
 	];
 
+	let engines = [
+		{ value: 'automatic1111', label: 'AUTOMATIC1111' },
+		{ value: 'comfyui', label: 'ComfyUI' },
+		{ value: 'swarmui', label: 'SwarmUI' },
+		{ value: 'openai', label: 'OpenAI' },
+		{ value: 'gemini', label: 'Gemini' }
+	];
+
 	const getModels = async () => {
 		models = await getImageGenerationModels(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
@@ -268,6 +276,9 @@
 										} else if (config.engine === 'gemini' && config.gemini.GEMINI_API_KEY === '') {
 											toast.error($i18n.t('Gemini API Key is required.'));
 											config.enabled = false;
+										} else if (config.engine === 'swarmui' && config.swarmui.SWARMUI_BASE_URL === '') {
+											toast.error($i18n.t('SwarmUI Base URL is required.'));
+											config.enabled = false;
 										}
 									}
 
@@ -298,10 +309,9 @@
 								updateConfigHandler();
 							}}
 						>
-							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
-							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
-							<option value="automatic1111">{$i18n.t('Automatic1111')}</option>
-							<option value="gemini">{$i18n.t('Gemini')}</option>
+							{#each engines as engine}
+								<option value={engine.value}>{engine.label}</option>
+							{/each}
 						</select>
 					</div>
 				</div>
@@ -595,6 +605,73 @@
 							</div>
 						</div>
 					{/if}
+				{:else if config?.engine === 'swarmui'}
+					<div class="">
+						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI Base URL')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<input
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									placeholder={$i18n.t('Enter URL (e.g. http://127.0.0.1:8188/)')}
+									bind:value={config.swarmui.SWARMUI_BASE_URL}
+								/>
+							</div>
+						</div>
+					</div>
+					<div class="">
+						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI API Key')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<SensitiveInput
+									placeholder={$i18n.t('sk-1234')}
+									bind:value={config.swarmui.SWARMUI_API_KEY}
+									required={false}
+								/>
+							</div>
+						</div>
+					</div>
+					<div class="">
+						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI Workflow')}</div>
+						{#if config.swarmui.SWARMUI_WORKFLOW}
+							<textarea
+								class="w-full rounded-lg mb-1 py-2 px-4 text-xs bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden disabled:text-gray-600 resize-none"
+								rows="10"
+								bind:value={config.swarmui.SWARMUI_WORKFLOW}
+								required
+							/>
+						{/if}
+						<div class="flex w-full">
+							<div class="flex-1">
+								<input
+									id="upload-swarmui-workflow-input"
+									hidden
+									type="file"
+									accept=".json"
+									on:change={(e) => {
+										const file = e.target.files[0];
+										const reader = new FileReader();
+										reader.onload = (e) => {
+											config.swarmui.SWARMUI_WORKFLOW = e.target.result;
+											e.target.value = null;
+										};
+										reader.readAsText(file);
+									}}
+								/>
+								<button
+									class="w-full text-sm font-medium py-2 bg-transparent hover:bg-gray-100 border border-dashed dark:border-gray-850 dark:hover:bg-gray-850 text-center rounded-xl"
+									type="button"
+									on:click={() => {
+										document.getElementById('upload-swarmui-workflow-input')?.click();
+									}}
+								>
+									{$i18n.t('Click here to upload a workflow.json file.')}
+								</button>
+							</div>
+						</div>
+						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t('Make sure to export a workflow.json file as API format from SwarmUI.')}
+						</div>
+					</div>
 				{:else if config?.engine === 'openai'}
 					<div>
 						<div class=" mb-1.5 text-sm font-medium">{$i18n.t('OpenAI API Config')}</div>

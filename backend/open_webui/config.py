@@ -75,6 +75,7 @@ class Config(Base):
     version = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(DateTime, nullable=True, onupdate=func.now())
+    # Add SwarmUI fields to config if needed
 
 
 def load_json_config():
@@ -2487,6 +2488,18 @@ IMAGE_GENERATION_MODEL = PersistentConfig(
     os.getenv("IMAGE_GENERATION_MODEL", ""),
 )
 
+SWARMUI_BASE_URL = PersistentConfig(
+    "SWARMUI_BASE_URL",
+    "image_generation.swarmui.base_url",
+    os.getenv("SWARMUI_BASE_URL", ""),
+)
+
+SWARMUI_API_KEY = PersistentConfig(
+    "SWARMUI_API_KEY",
+    "image_generation.swarmui.api_key",
+    os.getenv("SWARMUI_API_KEY", ""),
+)
+
 ####################################
 # Audio
 ####################################
@@ -2693,3 +2706,9 @@ LDAP_CA_CERT_FILE = PersistentConfig(
 LDAP_CIPHERS = PersistentConfig(
     "LDAP_CIPHERS", "ldap.server.ciphers", os.environ.get("LDAP_CIPHERS", "ALL")
 )
+
+# Add SwarmUI config variables (for demonstration, add near other engine configs)
+SWARMUI_BASE_URL = os.environ.get("SWARMUI_BASE_URL", "http://127.0.0.1:8188")
+SWARMUI_API_KEY = os.environ.get("SWARMUI_API_KEY", "")
+SWARMUI_WORKFLOW = os.environ.get("SWARMUI_WORKFLOW", "")
+SWARMUI_WORKFLOW_NODES = os.environ.get("SWARMUI_WORKFLOW_NODES", "[]")

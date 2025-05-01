@@ -755,25 +755,61 @@ async def image_generations(
                 raise HTTPException(status_code=400, detail=res["error"])
             
             images = []
-            # Check for images in different formats from SwarmUI API
-            if "data" in res:
-                # Format: {"data": [{"url": "image_url"}, ...]}
-                images = res["data"]
-            elif "images" in res:
-                # Format: {"images": ["image_path", ...]}
-                base_url = request.app.state.config.SWARMUI_BASE_URL
-                for image_path in res["images"]:
-                    # Check if it's a full URL or just a path
-                    if image_path.startswith("http"):
-                        images.append({"url": image_path})
+            # Process SwarmUI image response to match the pattern of other engines
+            if "data" in res and isinstance(res["data"], list):
+                # Already in correct format, just use as is
+                for image in res["data"]:
+                    headers = None
+                    if request.app.state.config.SWARMUI_AUTH_HEADER:
+                        headers = {"Authorization": request.app.state.config.SWARMUI_AUTH_HEADER}
+                    
+                    if isinstance(image, dict) and "url" in image:
+                        image_url = image["url"]
                     else:
-                        # Construct full URL from base and path
-                        images.append({"url": f"{base_url}/{image_path}"})
+                        # If it's not a dict with url, something is wrong
+                        continue
+                    
+                    image_data, content_type = load_url_image_data(image_url, headers)
+                    url = upload_image(
+                        request,
+                        payload,
+                        image_data,
+                        content_type,
+                        user,
+                    )
+                    images.append({"url": url})
+            elif "images" in res and isinstance(res["images"], list):
+                # Convert paths to proper URLs and upload
+                base_url = request.app.state.config.SWARMUI_BASE_URL
+                headers = None
+                if request.app.state.config.SWARMUI_AUTH_HEADER:
+                    headers = {"Authorization": request.app.state.config.SWARMUI_AUTH_HEADER}
+                
+                for image_path in res["images"]:
+                    # Construct full image URL
+                    if image_path.startswith("http"):
+                        image_url = image_path
+                    else:
+                        image_url = f"{base_url}/{image_path}"
+                    
+                    # Download and upload the image
+                    try:
+                        image_data, content_type = load_url_image_data(image_url, headers)
+                        url = upload_image(
+                            request,
+                            payload,
+                            image_data,
+                            content_type,
+                            user,
+                        )
+                        images.append({"url": url})
+                    except Exception as e:
+                        log.error(f"Error loading image from SwarmUI: {e}")
             else:
                 log.error(f"Unknown response format from SwarmUI: {res}")
                 raise HTTPException(status_code=500, detail="Unknown response format from image generation API")
                 
-            return {"images": images}
+            return images
 
         elif (
             request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"

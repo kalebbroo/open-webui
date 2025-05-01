@@ -1212,7 +1212,7 @@ async def process_chat_response(
                         content = f"{content}{block['content'].strip()}\n"
                     elif block["type"] == "tool_calls":
                         attributes = block.get("attributes", {})
-
+                        output = block.get("output", None)
                         tool_calls = block.get("content", [])
                         results = block.get("results", [])
 

@@ -500,6 +500,6 @@ EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
 
 # Add SwarmUI env variables
 SWARMUI_BASE_URL = os.environ.get("SWARMUI_BASE_URL", "http://127.0.0.1:8188")
-SWARMUI_API_KEY = os.environ.get("SWARMUI_API_KEY", "")
+SWARMUI_AUTH_HEADER = os.environ.get("SWARMUI_AUTH_HEADER", "")
 SWARMUI_WORKFLOW = os.environ.get("SWARMUI_WORKFLOW", "")
 SWARMUI_WORKFLOW_NODES = os.environ.get("SWARMUI_WORKFLOW_NODES", "[]")

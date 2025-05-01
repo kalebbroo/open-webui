@@ -619,57 +619,18 @@
 						</div>
 					</div>
 					<div class="">
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI API Key')}</div>
+						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI Authentication')}</div>
 						<div class="flex w-full">
 							<div class="flex-1 mr-2">
 								<SensitiveInput
-									placeholder={$i18n.t('sk-1234')}
-									bind:value={config.swarmui.SWARMUI_API_KEY}
+									placeholder={$i18n.t('Bearer token for authentication')}
+									bind:value={config.swarmui.SWARMUI_AUTH_HEADER}
 									required={false}
 								/>
 							</div>
 						</div>
-					</div>
-					<div class="">
-						<div class=" mb-2 text-sm font-medium">{$i18n.t('SwarmUI Workflow')}</div>
-						{#if config.swarmui.SWARMUI_WORKFLOW}
-							<textarea
-								class="w-full rounded-lg mb-1 py-2 px-4 text-xs bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden disabled:text-gray-600 resize-none"
-								rows="10"
-								bind:value={config.swarmui.SWARMUI_WORKFLOW}
-								required
-							/>
-						{/if}
-						<div class="flex w-full">
-							<div class="flex-1">
-								<input
-									id="upload-swarmui-workflow-input"
-									hidden
-									type="file"
-									accept=".json"
-									on:change={(e) => {
-										const file = e.target.files[0];
-										const reader = new FileReader();
-										reader.onload = (e) => {
-											config.swarmui.SWARMUI_WORKFLOW = e.target.result;
-											e.target.value = null;
-										};
-										reader.readAsText(file);
-									}}
-								/>
-								<button
-									class="w-full text-sm font-medium py-2 bg-transparent hover:bg-gray-100 border border-dashed dark:border-gray-850 dark:hover:bg-gray-850 text-center rounded-xl"
-									type="button"
-									on:click={() => {
-										document.getElementById('upload-swarmui-workflow-input')?.click();
-									}}
-								>
-									{$i18n.t('Click here to upload a workflow.json file.')}
-								</button>
-							</div>
-						</div>
 						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
-							{$i18n.t('Make sure to export a workflow.json file as API format from SwarmUI.')}
+							{$i18n.t('Authentication token will be sent as-is in the Authorization header')}
 						</div>
 					</div>
 				{:else if config?.engine === 'openai'}

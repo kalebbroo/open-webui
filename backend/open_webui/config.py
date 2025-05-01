@@ -2275,6 +2275,16 @@ ENABLE_IMAGE_PROMPT_GENERATION = PersistentConfig(
     os.environ.get("ENABLE_IMAGE_PROMPT_GENERATION", "true").lower() == "true",
 )
 
+SWARMUI_BASE_URL = PersistentConfig(
+    "SWARMUI_BASE_URL",
+    "swarmui.SWARMUI_BASE_URL",
+    os.getenv("SWARMUI_BASE_URL", ""),
+)
+SWARMUI_AUTH_HEADER = PersistentConfig(
+    "SWARMUI_AUTH_HEADER",
+    "swarmui.SWARMUI_AUTH_HEADER",
+    os.getenv("SWARMUI_AUTH_HEADER", ""),
+)
 AUTOMATIC1111_BASE_URL = PersistentConfig(
     "AUTOMATIC1111_BASE_URL",
     "image_generation.automatic1111.base_url",
@@ -2488,18 +2498,6 @@ IMAGE_GENERATION_MODEL = PersistentConfig(
     os.getenv("IMAGE_GENERATION_MODEL", ""),
 )
 
-SWARMUI_BASE_URL = PersistentConfig(
-    "SWARMUI_BASE_URL",
-    "image_generation.swarmui.base_url",
-    os.getenv("SWARMUI_BASE_URL", ""),
-)
-
-SWARMUI_API_KEY = PersistentConfig(
-    "SWARMUI_API_KEY",
-    "image_generation.swarmui.api_key",
-    os.getenv("SWARMUI_API_KEY", ""),
-)
-
 ####################################
 # Audio
 ####################################
@@ -2706,9 +2704,3 @@ LDAP_CA_CERT_FILE = PersistentConfig(
 LDAP_CIPHERS = PersistentConfig(
     "LDAP_CIPHERS", "ldap.server.ciphers", os.environ.get("LDAP_CIPHERS", "ALL")
 )
-
-# Add SwarmUI config variables (for demonstration, add near other engine configs)
-SWARMUI_BASE_URL = os.environ.get("SWARMUI_BASE_URL", "http://127.0.0.1:8188")
-SWARMUI_API_KEY = os.environ.get("SWARMUI_API_KEY", "")
-SWARMUI_WORKFLOW = os.environ.get("SWARMUI_WORKFLOW", "")
-SWARMUI_WORKFLOW_NODES = os.environ.get("SWARMUI_WORKFLOW_NODES", "[]")

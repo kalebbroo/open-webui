@@ -22,7 +22,6 @@ from open_webui.utils.images.comfyui import (
 )
 from open_webui.utils.images.swarmui import (
     SwarmUIGenerateImageForm,
-    SwarmUIWorkflow,
     swarmui_generate_image,
     list_swarmui_models
 )
@@ -63,9 +62,7 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         },
         "swarmui": {
             "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
-            "SWARMUI_API_KEY": request.app.state.config.SWARMUI_API_KEY,
-            "SWARMUI_WORKFLOW": request.app.state.config.SWARMUI_WORKFLOW,
-            "SWARMUI_WORKFLOW_NODES": request.app.state.config.SWARMUI_WORKFLOW_NODES,
+            "SWARMUI_AUTH_HEADER": request.app.state.config.SWARMUI_AUTH_HEADER,
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
@@ -96,9 +93,7 @@ class ComfyUIConfigForm(BaseModel):
 
 class SwarmUIConfigForm(BaseModel):
     SWARMUI_BASE_URL: str
-    SWARMUI_API_KEY: str
-    SWARMUI_WORKFLOW: str
-    SWARMUI_WORKFLOW_NODES: list[dict]
+    SWARMUI_AUTH_HEADER: str
 
 
 class GeminiConfigForm(BaseModel):
@@ -173,11 +168,7 @@ async def update_config(
     request.app.state.config.SWARMUI_BASE_URL = (
         form_data.swarmui.SWARMUI_BASE_URL.strip("/")
     )
-    request.app.state.config.SWARMUI_API_KEY = form_data.swarmui.SWARMUI_API_KEY
-    request.app.state.config.SWARMUI_WORKFLOW = form_data.swarmui.SWARMUI_WORKFLOW
-    request.app.state.config.SWARMUI_WORKFLOW_NODES = (
-        form_data.swarmui.SWARMUI_WORKFLOW_NODES
-    )
+    request.app.state.config.SWARMUI_AUTH_HEADER = form_data.swarmui.SWARMUI_AUTH_HEADER
 
     return {
         "enabled": request.app.state.config.ENABLE_IMAGE_GENERATION,
@@ -202,9 +193,7 @@ async def update_config(
         },
         "swarmui": {
             "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
-            "SWARMUI_API_KEY": request.app.state.config.SWARMUI_API_KEY,
-            "SWARMUI_WORKFLOW": request.app.state.config.SWARMUI_WORKFLOW,
-            "SWARMUI_WORKFLOW_NODES": request.app.state.config.SWARMUI_WORKFLOW_NODES,
+            "SWARMUI_AUTH_HEADER": request.app.state.config.SWARMUI_AUTH_HEADER,
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
@@ -259,9 +248,9 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
     elif request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
 
         headers = None
-        if request.app.state.config.SWARMUI_API_KEY:
+        if request.app.state.config.SWARMUI_AUTH_HEADER:
             headers = {
-                "Authorization": f"Bearer {request.app.state.config.SWARMUI_API_KEY}"
+                "Authorization": request.app.state.config.SWARMUI_AUTH_HEADER
             }
 
         try:
@@ -443,14 +432,58 @@ def get_models(request: Request, user=Depends(get_verified_user)):
             # Use SwarmUI's /API/ListModels endpoint
             from open_webui.utils.images.swarmui import list_swarmui_models
             base_url = request.app.state.config.SWARMUI_BASE_URL
-            api_key = request.app.state.config.SWARMUI_API_KEY
+            auth_header = request.app.state.config.SWARMUI_AUTH_HEADER
             # Use root path, depth=1, subtype=Stable-Diffusion for now
-            models = list_swarmui_models(base_url, api_key)
-            # Format as list of dicts with id and name
-            return [
-                {"id": model["name"], "name": model.get("name", model["name"])}
-                for model in models
-            ]
+            try:
+                log.info(f"Fetching SwarmUI models from {base_url}")
+                models = list_swarmui_models(
+                    base_url=base_url, 
+                    auth_header=auth_header,
+                    path="",
+                    depth=1,
+                    subtype="Stable-Diffusion"
+                )
+                # Format as list of dicts with id and name
+                if not models:
+                    log.warning("No SwarmUI models returned")
+                    # Return a dummy model if none are found, using the current model from config
+                    current_model = request.app.state.config.IMAGE_GENERATION_MODEL
+                    if current_model:
+                        return [{"id": current_model, "name": current_model}]
+                    return []
+                    
+                formatted_models = []
+                # Handle different model formats
+                for model in models:
+                    if isinstance(model, str):
+                        # Just a model name string
+                        formatted_models.append({"id": model, "name": model})
+                    elif isinstance(model, dict):
+                        # Extract relevant fields based on available keys
+                        if "name" in model:
+                            model_name = model.get("name", "")
+                            # Handle both possible response formats from SwarmUI
+                            if "path" in model:
+                                model_id = model.get("path", model_name)
+                            else:
+                                model_id = model_name
+                            formatted_models.append({"id": model_id, "name": model_name})
+                        elif "id" in model and "title" in model:
+                            # Format similar to A1111
+                            formatted_models.append({"id": model.get("id"), "name": model.get("title")})
+                        elif "id" in model:
+                            # Simple id only format
+                            formatted_models.append({"id": model.get("id"), "name": model.get("id")})
+                
+                log.info(f"Found {len(formatted_models)} SwarmUI models")
+                return formatted_models
+            except Exception as e:
+                log.exception(f"Error fetching SwarmUI models: {e}")
+                # Return a dummy model if there's an error
+                current_model = request.app.state.config.IMAGE_GENERATION_MODEL
+                if current_model:
+                    return [{"id": current_model, "name": current_model}]
+                return []
         elif (
             request.app.state.config.IMAGE_GENERATION_ENGINE == "automatic1111"
             or request.app.state.config.IMAGE_GENERATION_ENGINE == ""
@@ -523,7 +556,7 @@ def upload_image(request, image_metadata, image_data, content_type, user):
 @router.post("/generations")
 async def image_generations(
     request: Request,
-    form_data: GenerateImageForm,
+    form_data: SwarmUIGenerateImageForm,
     user=Depends(get_verified_user),
 ):
     width, height = tuple(map(int, request.app.state.config.IMAGE_SIZE.split("x")))
@@ -673,21 +706,73 @@ async def image_generations(
 
         elif request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
             # SwarmUI: mimic comfyui logic but call SwarmUI
+            log.debug(f"Generating image with SwarmUI using model: {request.app.state.config.IMAGE_GENERATION_MODEL}")
+            
+            # Create a proper payload dictionary regardless of input form type
+            payload = {}
+            
+            # Check if form_data is a dict or an object
+            if isinstance(form_data, dict):
+                log.debug("Form data is a dictionary")
+                payload = form_data.copy()
+                # Ensure required params are set
+                if 'width' not in payload:
+                    payload['width'] = width
+                if 'height' not in payload:
+                    payload['height'] = height
+            else:
+                log.debug("Form data is an object")
+                # Extract attributes from form_data object
+                payload = {
+                    'prompt': form_data.prompt,
+                    'width': width,
+                    'height': height,
+                    'n': form_data.n if hasattr(form_data, 'n') else 1
+                }
+                
+                # Add optional fields if they exist
+                if hasattr(form_data, 'negative_prompt') and form_data.negative_prompt:
+                    payload['negative_prompt'] = form_data.negative_prompt
+                if hasattr(form_data, 'steps') and form_data.steps:
+                    payload['steps'] = form_data.steps
+                if hasattr(form_data, 'seed') and form_data.seed is not None:
+                    payload['seed'] = form_data.seed
+            
+            # Log the payload we're sending to SwarmUI
+            log.debug(f"Image generation payload: {payload}")
+            
             res = swarmui_generate_image(
                 request.app.state.config.IMAGE_GENERATION_MODEL,
-                form_data,
+                payload,
                 user.id,
                 request.app.state.config.SWARMUI_BASE_URL,
-                request.app.state.config.SWARMUI_API_KEY,
+                request.app.state.config.SWARMUI_AUTH_HEADER,
             )
             log.debug(f"SwarmUI res: {res}")
+            
+            if "error" in res:
+                log.error(f"SwarmUI image generation error: {res['error']}")
+                raise HTTPException(status_code=400, detail=res["error"])
+            
             images = []
-            for image in res.get("data", []):
-                headers = None
-                if request.app.state.config.SWARMUI_API_KEY:
-                    headers = {"Authorization": f"Bearer {request.app.state.config.SWARMUI_API_KEY}"}
-                # If image is a data URL, decode. If image is a URL, fetch as needed or just return.
-                images.append(image["url"])
+            # Check for images in different formats from SwarmUI API
+            if "data" in res:
+                # Format: {"data": [{"url": "image_url"}, ...]}
+                images = res["data"]
+            elif "images" in res:
+                # Format: {"images": ["image_path", ...]}
+                base_url = request.app.state.config.SWARMUI_BASE_URL
+                for image_path in res["images"]:
+                    # Check if it's a full URL or just a path
+                    if image_path.startswith("http"):
+                        images.append({"url": image_path})
+                    else:
+                        # Construct full URL from base and path
+                        images.append({"url": f"{base_url}/{image_path}"})
+            else:
+                log.error(f"Unknown response format from SwarmUI: {res}")
+                raise HTTPException(status_code=500, detail="Unknown response format from image generation API")
+                
             return {"images": images}
 
         elif (

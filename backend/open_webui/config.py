@@ -2285,6 +2285,43 @@ SWARMUI_AUTH_HEADER = PersistentConfig(
     "swarmui.SWARMUI_AUTH_HEADER",
     os.getenv("SWARMUI_AUTH_HEADER", ""),
 )
+SWARMUI_CFG_SCALE = PersistentConfig(
+    "SWARMUI_CFG_SCALE",
+    "swarmui.SWARMUI_CFG_SCALE",
+    (
+        float(os.environ.get("SWARMUI_CFG_SCALE"))
+        if os.environ.get("SWARMUI_CFG_SCALE")
+        else None
+    ),
+)
+SWARMUI_SAMPLER = PersistentConfig(
+    "SWARMUI_SAMPLER",
+    "swarmui.SWARMUI_SAMPLER",
+    (
+        os.environ.get("SWARMUI_SAMPLER")
+        if os.environ.get("SWARMUI_SAMPLER")
+        else None
+    ),
+)
+SWARMUI_SCHEDULER = PersistentConfig(
+    "SWARMUI_SCHEDULER",
+    "swarmui.SWARMUI_SCHEDULER",
+    (
+        os.environ.get("SWARMUI_SCHEDULER")
+        if os.environ.get("SWARMUI_SCHEDULER")
+        else None
+    ),
+)
+SWARMUI_PRESET = PersistentConfig(
+    "SWARMUI_PRESET",
+    "swarmui.SWARMUI_PRESET",
+    (
+        os.environ.get("SWARMUI_PRESET")
+        if os.environ.get("SWARMUI_PRESET")
+        else None
+    ),
+)
+
 AUTOMATIC1111_BASE_URL = PersistentConfig(
     "AUTOMATIC1111_BASE_URL",
     "image_generation.automatic1111.base_url",

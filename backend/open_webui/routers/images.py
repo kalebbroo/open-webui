@@ -6,7 +6,7 @@ import logging
 import mimetypes
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
@@ -23,7 +23,9 @@ from open_webui.utils.images.comfyui import (
 from open_webui.utils.images.swarmui import (
     SwarmUIGenerateImageForm,
     swarmui_generate_image,
-    list_swarmui_models
+    list_swarmui_models,
+    get_swarmui_presets,
+    get_swarmui_parameters
 )
 from pydantic import BaseModel
 
@@ -32,6 +34,17 @@ log.setLevel(SRC_LOG_LEVELS["IMAGES"])
 
 IMAGE_CACHE_DIR = CACHE_DIR / "image" / "generations"
 IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class GenerateImageForm(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = None
+    n: int = 1
+    width: Optional[int] = None
+    height: Optional[int] = None
+    steps: Optional[int] = None
+    seed: Optional[int] = None
+    model: Optional[str] = None
 
 
 router = APIRouter()
@@ -63,6 +76,10 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
         "swarmui": {
             "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
             "SWARMUI_AUTH_HEADER": request.app.state.config.SWARMUI_AUTH_HEADER,
+            "SWARMUI_CFG_SCALE": request.app.state.config.SWARMUI_CFG_SCALE,
+            "SWARMUI_SAMPLER": request.app.state.config.SWARMUI_SAMPLER,
+            "SWARMUI_SCHEDULER": request.app.state.config.SWARMUI_SCHEDULER,
+            "SWARMUI_PRESET": request.app.state.config.SWARMUI_PRESET,
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
@@ -94,6 +111,10 @@ class ComfyUIConfigForm(BaseModel):
 class SwarmUIConfigForm(BaseModel):
     SWARMUI_BASE_URL: str
     SWARMUI_AUTH_HEADER: str
+    SWARMUI_CFG_SCALE: Optional[float] = 1.0
+    SWARMUI_SAMPLER: Optional[str] = None
+    SWARMUI_SCHEDULER: Optional[str] = None
+    SWARMUI_PRESET: Optional[str] = None
 
 
 class GeminiConfigForm(BaseModel):
@@ -169,6 +190,10 @@ async def update_config(
         form_data.swarmui.SWARMUI_BASE_URL.strip("/")
     )
     request.app.state.config.SWARMUI_AUTH_HEADER = form_data.swarmui.SWARMUI_AUTH_HEADER
+    request.app.state.config.SWARMUI_CFG_SCALE = form_data.swarmui.SWARMUI_CFG_SCALE
+    request.app.state.config.SWARMUI_SAMPLER = form_data.swarmui.SWARMUI_SAMPLER
+    request.app.state.config.SWARMUI_SCHEDULER = form_data.swarmui.SWARMUI_SCHEDULER
+    request.app.state.config.SWARMUI_PRESET = form_data.swarmui.SWARMUI_PRESET
 
     return {
         "enabled": request.app.state.config.ENABLE_IMAGE_GENERATION,
@@ -194,6 +219,10 @@ async def update_config(
         "swarmui": {
             "SWARMUI_BASE_URL": request.app.state.config.SWARMUI_BASE_URL,
             "SWARMUI_AUTH_HEADER": request.app.state.config.SWARMUI_AUTH_HEADER,
+            "SWARMUI_CFG_SCALE": request.app.state.config.SWARMUI_CFG_SCALE,
+            "SWARMUI_SAMPLER": request.app.state.config.SWARMUI_SAMPLER,
+            "SWARMUI_SCHEDULER": request.app.state.config.SWARMUI_SCHEDULER,
+            "SWARMUI_PRESET": request.app.state.config.SWARMUI_PRESET,
         },
         "gemini": {
             "GEMINI_API_BASE_URL": request.app.state.config.IMAGES_GEMINI_API_BASE_URL,
@@ -433,14 +462,14 @@ def get_models(request: Request, user=Depends(get_verified_user)):
             from open_webui.utils.images.swarmui import list_swarmui_models
             base_url = request.app.state.config.SWARMUI_BASE_URL
             auth_header = request.app.state.config.SWARMUI_AUTH_HEADER
-            # Use root path, depth=1, subtype=Stable-Diffusion for now
+            # Use root path, depth=2, subtype=Stable-Diffusion
             try:
                 log.info(f"Fetching SwarmUI models from {base_url}")
                 models = list_swarmui_models(
                     base_url=base_url, 
                     auth_header=auth_header,
                     path="",
-                    depth=1,
+                    depth=2,
                     subtype="Stable-Diffusion"
                 )
                 # Format as list of dicts with id and name
@@ -741,8 +770,43 @@ async def image_generations(
             # Log the payload we're sending to SwarmUI
             log.debug(f"Image generation payload: {payload}")
             
+            # Add default parameters from configuration if not in payload
+            if 'cfg_scale' not in payload and request.app.state.config.SWARMUI_CFG_SCALE:
+                payload['cfg_scale'] = request.app.state.config.SWARMUI_CFG_SCALE
+                log.debug(f"Adding default cfg_scale: {payload['cfg_scale']}")
+                
+            if 'sampler' not in payload and request.app.state.config.SWARMUI_SAMPLER:
+                payload['sampler'] = request.app.state.config.SWARMUI_SAMPLER
+                log.debug(f"Adding default sampler: {payload['sampler']}")
+                
+            if 'scheduler' not in payload and request.app.state.config.SWARMUI_SCHEDULER:
+                payload['scheduler'] = request.app.state.config.SWARMUI_SCHEDULER
+                log.debug(f"Adding default scheduler: {payload['scheduler']}")
+                
+            if 'preset' not in payload and request.app.state.config.SWARMUI_PRESET:
+                payload['preset'] = request.app.state.config.SWARMUI_PRESET
+                log.debug(f"Adding default preset: {payload['preset']}")
+                
+            # If steps are not provided, use the default from config
+            if 'steps' not in payload and request.app.state.config.IMAGE_STEPS:
+                payload['steps'] = request.app.state.config.IMAGE_STEPS
+                log.debug(f"Adding default steps: {payload['steps']}")
+            
+            # Get model from configuration if not specified in payload
+            model_name = request.app.state.config.IMAGE_GENERATION_MODEL
+            
+            # If model name contains slashes, dots, or other characters, clean it up
+            if model_name:
+                # Remove file extension if present
+                if "." in model_name:
+                    model_name = model_name.split(".")[0]
+                # Take only the last part after slashes
+                if "/" in model_name:
+                    model_name = model_name.split("/")[-1]
+                log.debug(f"Using cleaned model name: {model_name}")
+            
             res = swarmui_generate_image(
-                request.app.state.config.IMAGE_GENERATION_MODEL,
+                model_name,
                 payload,
                 user.id,
                 request.app.state.config.SWARMUI_BASE_URL,
@@ -779,32 +843,62 @@ async def image_generations(
                     )
                     images.append({"url": url})
             elif "images" in res and isinstance(res["images"], list):
-                # Convert paths to proper URLs and upload
+                # Handle both base64 images and file paths
                 base_url = request.app.state.config.SWARMUI_BASE_URL
                 headers = None
                 if request.app.state.config.SWARMUI_AUTH_HEADER:
                     headers = {"Authorization": request.app.state.config.SWARMUI_AUTH_HEADER}
                 
-                for image_path in res["images"]:
-                    # Construct full image URL
-                    if image_path.startswith("http"):
-                        image_url = image_path
-                    else:
-                        image_url = f"{base_url}/{image_path}"
-                    
-                    # Download and upload the image
+                for image_item in res["images"]:
                     try:
-                        image_data, content_type = load_url_image_data(image_url, headers)
-                        url = upload_image(
-                            request,
-                            payload,
-                            image_data,
-                            content_type,
-                            user,
-                        )
-                        images.append({"url": url})
+                        # Check if it's a base64 image or a file path
+                        if isinstance(image_item, dict) and "base64" in image_item:
+                            # It's a base64 image
+                            image_data, content_type = load_b64_image_data(image_item["base64"])
+                            url = upload_image(
+                                request,
+                                payload,
+                                image_data,
+                                content_type,
+                                user,
+                            )
+                            images.append({"url": url})
+                        elif isinstance(image_item, str) and image_item.startswith("data:"):
+                            # It's a data URL
+                            image_data, content_type = load_b64_image_data(image_item.split(",", 1)[1])
+                            url = upload_image(
+                                request,
+                                payload,
+                                image_data,
+                                content_type,
+                                user,
+                            )
+                            images.append({"url": url})
+                        else:
+                            # It's a file path, construct URL and download
+                            image_path = image_item
+                            if isinstance(image_item, dict) and "url" in image_item:
+                                image_path = image_item["url"]
+                                
+                            # Construct full image URL if needed
+                            if isinstance(image_path, str):
+                                if image_path.startswith("http"):
+                                    image_url = image_path
+                                else:
+                                    image_url = f"{base_url}/{image_path}"
+                                
+                                # Download and upload the image
+                                image_data, content_type = load_url_image_data(image_url, headers)
+                                url = upload_image(
+                                    request,
+                                    payload,
+                                    image_data,
+                                    content_type,
+                                    user,
+                                )
+                                images.append({"url": url})
                     except Exception as e:
-                        log.error(f"Error loading image from SwarmUI: {e}")
+                        log.error(f"Error processing SwarmUI image: {e}")
             else:
                 log.error(f"Unknown response format from SwarmUI: {res}")
                 raise HTTPException(status_code=500, detail="Unknown response format from image generation API")
@@ -871,3 +965,36 @@ async def image_generations(
             if "error" in data:
                 error = data["error"]["message"]
         raise HTTPException(status_code=400, detail=ERROR_MESSAGES.DEFAULT(error))
+
+
+@router.get("/engine/presets", response_model=List[Dict[str, Any]])
+async def get_engine_presets_endpoint(request: Request, user=Depends(get_verified_user)):
+    """Get presets for the current image generation engine"""
+    log.info(f"Fetching presets for {request.app.state.config.IMAGE_GENERATION_ENGINE}")
+    
+    if request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
+        presets = get_swarmui_presets(
+            request.app.state.config.SWARMUI_BASE_URL,
+            request.app.state.config.SWARMUI_AUTH_HEADER
+        )
+        return presets
+    
+    # Handle other engines in the future
+    log.warning(f"Presets not supported for {request.app.state.config.IMAGE_GENERATION_ENGINE}")
+    return []
+
+@router.get("/engine/parameters", response_model=Dict[str, Any])
+async def get_engine_parameters_endpoint(request: Request, user=Depends(get_verified_user)):
+    """Get parameters (samplers, schedulers, etc.) for the current image generation engine"""
+    log.info(f"Fetching parameters for {request.app.state.config.IMAGE_GENERATION_ENGINE}")
+    
+    if request.app.state.config.IMAGE_GENERATION_ENGINE == "swarmui":
+        params = get_swarmui_parameters(
+            request.app.state.config.SWARMUI_BASE_URL,
+            request.app.state.config.SWARMUI_AUTH_HEADER
+        )
+        return params
+    
+    # Add support for other engines in the future
+    log.warning(f"Parameters not supported for {request.app.state.config.IMAGE_GENERATION_ENGINE}")
+    return {}

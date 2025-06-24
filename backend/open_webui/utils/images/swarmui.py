@@ -85,14 +85,19 @@ def get_images(ws, prompt, client_id, base_url, auth_header):
 
 
 class SwarmUIGenerateImageForm(BaseModel):
+    """Form for generating images with SwarmUI"""
     prompt: str
-    negative_prompt: Optional[str] = None
-    width: int
-    height: int
+    negative_prompt: str = ""
+    width: int = 512
+    height: int = 512
     n: int = 1
-    steps: Optional[int] = None
+    steps: int = 20
     seed: Optional[int] = None
-    model: Optional[str] = None
+    cfg_scale: Optional[float] = None
+    sampler: Optional[str] = None
+    scheduler: Optional[str] = None
+    preset: Optional[str] = None
+    preset_data: Optional[Dict[str, Any]] = None
 
 
 def get_swarmui_session_id(base_url: str, auth_header: str) -> str:
@@ -135,6 +140,12 @@ def swarmui_generate_image(
     log.info(f"swarmui_generate_image: model={model}, client_id={client_id}")
     log.debug(f"Payload: {payload}")
     
+    # Clean up model name by removing file extension if present
+    if model and "." in model:
+        # Remove file extension like .safetensors, .ckpt, etc.
+        model = model.split(".")[0]
+        log.info(f"Using cleaned model name: {model}")
+    
     headers = {**default_headers}
     if auth_header:
         headers["Authorization"] = auth_header
@@ -156,6 +167,11 @@ def swarmui_generate_image(
             n_images = payload.get("n", 1)
             steps = payload.get("steps", 20)
             seed = payload.get("seed", None)
+            cfg_scale = payload.get("cfg_scale", None)
+            sampler = payload.get("sampler", None)
+            scheduler = payload.get("scheduler", None)
+            preset = payload.get("preset", None)
+            preset_data = payload.get("preset_data", None)
         else:
             # It's a SwarmUIGenerateImageForm
             prompt = payload.prompt
@@ -165,6 +181,11 @@ def swarmui_generate_image(
             n_images = payload.n if hasattr(payload, "n") else 1
             steps = payload.steps if hasattr(payload, "steps") else 20
             seed = payload.seed if hasattr(payload, "seed") else None
+            cfg_scale = payload.cfg_scale if hasattr(payload, "cfg_scale") else None
+            sampler = payload.sampler if hasattr(payload, "sampler") else None
+            scheduler = payload.scheduler if hasattr(payload, "scheduler") else None
+            preset = payload.preset if hasattr(payload, "preset") else None
+            preset_data = payload.preset_data if hasattr(payload, "preset_data") else None
         
         # Create the raw input for the API call
         raw_input = {
@@ -174,12 +195,23 @@ def swarmui_generate_image(
             "steps": steps,
             "images": n_images,
             "session_id": session_id,
+            "do_not_save": True  # Request base64 instead of file paths
         }
         
         if negative_prompt:
             raw_input["negative_prompt"] = negative_prompt
         if seed is not None:
             raw_input["seed"] = seed
+        if cfg_scale is not None:
+            raw_input["cfg_scale"] = cfg_scale
+        if sampler is not None:
+            raw_input["sampler"] = sampler
+        if scheduler is not None:
+            raw_input["scheduler"] = scheduler
+        if preset is not None:
+            raw_input["preset"] = preset
+        if preset_data is not None:
+            raw_input["preset_data"] = preset_data
         if model:
             raw_input["model"] = model
         
@@ -223,11 +255,26 @@ def swarmui_generate_image(
         return {"error": str(e)}
 
 
-def list_swarmui_models(base_url: str, auth_header: str, path: str = "", depth: int = 1, subtype: str = "Stable-Diffusion", sortBy: str = "Name", allowRemote: bool = True, sortReverse: bool = False):
+def list_swarmui_models(base_url: str, auth_header: str, path: str = "", depth: int = 3, subtype: str = "Stable-Diffusion", sortBy: str = "Name", allowRemote: bool = True, sortReverse: bool = False):
     """
-    Calls SwarmUI's /API/ListModels endpoint to retrieve available models.
-    First obtains a session ID, then calls the models API.
+    Calls SwarmUI's /API/ListModels endpoint to get a list of available models.
+    Recursively traverses folders to depth specified.
+    
+    Args:
+        base_url: SwarmUI base URL
+        auth_header: Authentication header value
+        path: Folder path to search, "" for root
+        depth: Maximum folder depth to search
+        subtype: Model subtype (Stable-Diffusion, LoRA, etc.)
+        sortBy: How to sort models (Name, DateCreated, DateModified)
+        allowRemote: Include remote models not on local server
+        sortReverse: Reverse sort order if True
+        
+    Returns:
+        List of model objects or names
     """
+    log.info(f"Fetching SwarmUI models from {base_url}")
+    
     headers = {**default_headers}
     if auth_header:
         headers["Authorization"] = auth_header
@@ -235,52 +282,71 @@ def list_swarmui_models(base_url: str, auth_header: str, path: str = "", depth: 
     # First get a session ID
     session_id = get_swarmui_session_id(base_url, auth_header)
     if not session_id:
-        log.error("Failed to obtain SwarmUI session ID")
+        log.error("Failed to obtain SwarmUI session ID for listing models")
         return []
-        
-    # Now call the ListModels API with the session ID
-    url = f"{base_url}/API/ListModels"
-    payload = {
-        "path": path,
-        "depth": depth,
-        "subtype": subtype,
-        "sortBy": sortBy,
-        "allowRemote": allowRemote,
-        "sortReverse": sortReverse,
-        "session_id": session_id
-    }
+    
+    log.debug(f"Making request to {base_url}/API/ListModels with session_id: {session_id}")
     
     try:
-        log.info(f"Requesting SwarmUI models: {url}")
-        log.debug(f"Payload: {payload}")
-        log.debug(f"Headers: {headers}")
+        data = {
+            "session_id": session_id,
+            "subtype": subtype,
+            "path": path,
+            "sortBy": sortBy,
+            "allowRemote": allowRemote,
+            "sortReverse": sortReverse
+        }
         
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        log.debug(f"SwarmUI models response: {data}")
+        log.debug(f"ListModels request data: {data}")
         
-        # If we got an empty list or no 'files' key, try a different approach
-        if not data.get("files", []):
-            log.warning("No models found in the initial response, checking for fallback method")
-            
-            # Some SwarmUI instances might have models directly in the response
-            models_fallback = []
-            
-            # Try to parse models from the response in different possible formats
-            if "models" in data:
-                models_fallback = data.get("models", [])
-                log.info(f"Found {len(models_fallback)} models in 'models' key")
-            elif isinstance(data, list):
-                models_fallback = data
-                log.info(f"Response was a direct list with {len(models_fallback)} models")
-            
-            # If we found models in a fallback method, return them
-            if models_fallback:
-                return models_fallback
+        resp = requests.post(
+            f"{base_url}/API/ListModels",
+            headers=headers,
+            json=data,
+            timeout=20
+        )
         
-        # Return a flat list of model files with their metadata
-        return data.get("files", [])
+        # Log the raw response for debugging
+        log.debug(f"Raw response status: {resp.status_code}")
+        log.debug(f"Raw response headers: {resp.headers}")
+        log.debug(f"Raw response text snippet: {resp.text[:500]}...")  # Log first 500 chars
+        
+        resp.raise_for_status()
+        
+        # Try to parse as JSON
+        try:
+            result = resp.json()
+            log.debug(f"Parsed JSON response: {result}")
+        except Exception as e:
+            log.error(f"Failed to parse ListModels response as JSON: {e}")
+            # If it's not JSON, try to determine if it's HTML or other format
+            if resp.text and resp.text.strip().startswith("<!DOCTYPE html>"):
+                log.error("Received HTML response instead of JSON. This might indicate an authentication issue or incorrect URL")
+            return []
+            
+        # Extract models from response
+        models = []
+        if "models" in result:
+            models = result["models"]
+        elif "data" in result and "models" in result["data"]:
+            models = result["data"]["models"]
+            
+        # Process models into the expected format for the UI
+        formatted_models = []
+        for model in models:
+            model_id = model.get("name", "")
+            model_name = model.get("display_name", model_id)
+            
+            # Remove file extension if present
+            if "." in model_id:
+                base_model_id = model_id.split(".")[0]
+                formatted_models.append({"id": base_model_id, "name": model_name})
+            else:
+                formatted_models.append({"id": model_id, "name": model_name})
+            
+        log.debug(f"Extracted {len(formatted_models)} models")
+        return formatted_models
+        
     except Exception as e:
         log.exception(f"Error fetching SwarmUI models: {e}")
         return []
@@ -319,3 +385,133 @@ def select_swarmui_model(base_url: str, auth_header: str, model_path: str, backe
     except Exception as e:
         log.exception(f"Error selecting SwarmUI model: {e}")
         return False
+
+
+def get_swarmui_presets(base_url: str, auth_header: str) -> List[Dict[str, Any]]:
+    """
+    Fetches user presets from SwarmUI using the /API/GetMyUserData endpoint.
+    """
+    headers = {**default_headers}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    
+    log.debug(f"Making request to {base_url}/API/GetMyUserData for presets")
+    
+    try:
+        # First get a session ID
+        session_id = get_swarmui_session_id(base_url, auth_header)
+        if not session_id:
+            log.error("Failed to obtain SwarmUI session ID for presets")
+            return []
+            
+        # Some implementations require session_id in the request
+        data = {"session_id": session_id}
+        
+        resp = requests.post(
+            f"{base_url}/API/GetMyUserData",
+            headers=headers,
+            json=data,
+            timeout=20
+        )
+        
+        # Log responses for debugging
+        log.debug(f"Raw presets response status: {resp.status_code}")
+        log.debug(f"Raw presets response headers: {resp.headers}")
+        log.debug(f"Raw presets response text snippet: {resp.text[:500]}...")
+        
+        resp.raise_for_status()
+        
+        try:
+            data = resp.json()
+            log.debug(f"Parsed presets data: {data}")
+            
+            # Extract presets from response (they may be nested)
+            presets = []
+            if data and isinstance(data, dict):
+                if "presets" in data:
+                    presets = data["presets"]
+                elif "data" in data and isinstance(data["data"], dict) and "presets" in data["data"]:
+                    presets = data["data"]["presets"]
+            
+            # Format presets
+            formatted_presets = []
+            for preset in presets:
+                preset_id = preset.get("id", "")
+                preset_name = preset.get("name", preset_id)
+                formatted_presets.append({
+                    "id": preset_id,
+                    "name": preset_name,
+                    "data": preset
+                })
+            
+            log.debug(f"Extracted {len(formatted_presets)} presets")
+            return formatted_presets
+        except Exception as e:
+            log.error(f"Failed to parse presets response as JSON: {e}")
+            return []
+            
+    except Exception as e:
+        log.exception(f"Error fetching SwarmUI presets: {e}")
+        return []
+
+
+def get_swarmui_parameters(base_url: str, auth_header: str) -> Dict[str, Any]:
+    """
+    Fetches available parameters for SwarmUI using the /API/ListT2IParams endpoint.
+    This includes available samplers, schedulers, and other parameters.
+    """
+    headers = {**default_headers}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    
+    log.debug(f"Making request to {base_url}/API/ListT2IParams")
+    
+    try:
+        # First get a session ID
+        session_id = get_swarmui_session_id(base_url, auth_header)
+        if not session_id:
+            log.error("Failed to obtain SwarmUI session ID for parameters")
+            return {}
+            
+        # Some implementations require session_id in the request
+        data = {"session_id": session_id}
+        
+        resp = requests.post(
+            f"{base_url}/API/ListT2IParams",
+            headers=headers,
+            json=data,
+            timeout=20
+        )
+        
+        # Log responses for debugging
+        log.debug(f"Raw parameters response status: {resp.status_code}")
+        log.debug(f"Raw parameters response headers: {resp.headers}")
+        log.debug(f"Raw parameters response text snippet: {resp.text[:500]}...")
+        
+        resp.raise_for_status()
+        
+        try:
+            data = resp.json()
+            log.debug(f"Parsed parameters data: {data}")
+            
+            # Extract parameters
+            params = {}
+            if "samplers" in data:
+                params["samplers"] = data["samplers"]
+            elif "data" in data and "samplers" in data["data"]:
+                params["samplers"] = data["data"]["samplers"]
+            
+            if "schedulers" in data:
+                params["schedulers"] = data["schedulers"]
+            elif "data" in data and "schedulers" in data["data"]:
+                params["schedulers"] = data["data"]["schedulers"]
+                
+            log.debug(f"Extracted parameters: {params}")
+            return params
+        except Exception as e:
+            log.error(f"Failed to parse parameters response as JSON: {e}")
+            return {}
+            
+    except Exception as e:
+        log.exception(f"Error fetching SwarmUI parameters: {e}")
+        return {}

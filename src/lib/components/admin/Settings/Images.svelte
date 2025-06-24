@@ -11,7 +11,9 @@
 		updateImageGenerationConfig,
 		getConfig,
 		updateConfig,
-		verifyConfigUrl
+		verifyConfigUrl,
+		getEnginePresets,
+		getEngineParameters
 	} from '$lib/apis/images';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -24,6 +26,8 @@
 
 	let config = null;
 	let imageGenerationConfig = null;
+	let swarmUIPresets = [];
+	let swarmUIParams = { samplers: [], schedulers: [] };
 
 	let models = null;
 
@@ -112,6 +116,44 @@
 		});
 	};
 
+	const getSwarmUIData = async () => {
+		if (config?.engine === 'swarmui' && config?.swarmui?.SWARMUI_BASE_URL && config?.swarmui?.SWARMUI_AUTH_HEADER) {
+			console.log("Fetching SwarmUI data");
+			
+			// Get presets
+			swarmUIPresets = await getSwarmUIPresets(localStorage.token).catch((error) => {
+				toast.error(`Failed to load presets: ${error}`);
+				return [];
+			});
+			console.log("Received presets:", swarmUIPresets);
+			
+			// Get parameters
+			swarmUIParams = await getSwarmUIParameters(localStorage.token).catch((error) => {
+				toast.error(`Failed to load parameters: ${error}`);
+				return { samplers: [], schedulers: [] };
+			});
+			console.log("Received parameters:", swarmUIParams);
+			
+			// If API returned samplers/schedulers, use them instead of defaults
+			if (swarmUIParams.samplers && swarmUIParams.samplers.length > 0) {
+				samplers = swarmUIParams.samplers;
+			}
+			
+			if (swarmUIParams.schedulers && swarmUIParams.schedulers.length > 0) {
+				schedulers = swarmUIParams.schedulers;
+			}
+		}
+	};
+
+	const getPresets = async () => {
+		if (config?.engine === 'swarmui' && config?.swarmui?.SWARMUI_BASE_URL && config?.swarmui?.SWARMUI_AUTH_HEADER) {
+			swarmUIPresets = await getSwarmUIPresets(localStorage.token).catch((error) => {
+				toast.error(`Failed to load presets: ${error}`);
+				return [];
+			});
+		}
+	};
+
 	const updateConfigHandler = async () => {
 		const res = await updateConfig(localStorage.token, config)
 			.catch((error) => {
@@ -130,6 +172,9 @@
 		if (config.enabled) {
 			backendConfig.set(await getBackendConfig());
 			getModels();
+			if (config.engine === 'swarmui') {
+				getSwarmUIData();
+			}
 		}
 	};
 
@@ -196,6 +241,9 @@
 
 			if (config.enabled) {
 				getModels();
+				if (config?.engine === 'swarmui') {
+					getSwarmUIData();
+				}
 			}
 
 			if (config.comfyui.COMFYUI_WORKFLOW) {
@@ -632,6 +680,102 @@
 						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
 							{$i18n.t('Authentication token will be sent as-is in the Authorization header')}
 						</div>
+					</div>
+
+					<!-- SwarmUI additional settings -->
+					<div>
+						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('SwarmUI Default CFG Scale')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<Tooltip content={$i18n.t('Enter CFG Scale (e.g. 7.0)')} placement="top-start">
+									<input
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										placeholder={$i18n.t('Enter CFG Scale (e.g. 7.0)')}
+										bind:value={config.swarmui.SWARMUI_CFG_SCALE}
+									/>
+								</Tooltip>
+							</div>
+						</div>
+						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t('Default classifier-free guidance scale. Higher values make images match prompt more closely')}
+						</div>
+					</div>
+					
+					<div>
+						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('SwarmUI Default Sampler')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<select
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									bind:value={config.swarmui.SWARMUI_SAMPLER}
+								>
+									<option value="">{$i18n.t('Default')}</option>
+									{#each samplers as sampler}
+										<option value={sampler}>{sampler}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t('Default sampling algorithm to use for diffusion')}
+						</div>
+					</div>
+					
+					<div>
+						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('SwarmUI Default Scheduler')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<select
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+									bind:value={config.swarmui.SWARMUI_SCHEDULER}
+								>
+									<option value="">{$i18n.t('Default')}</option>
+									{#each schedulers as scheduler}
+										<option value={scheduler}>{scheduler}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+						<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+							{$i18n.t('Default noise schedule for the diffusion process')}
+						</div>
+					</div>
+					
+					<div>
+						<div class=" mb-2.5 text-sm font-medium">{$i18n.t('SwarmUI Presets')}</div>
+						<div class="flex w-full">
+							<div class="flex-1 mr-2">
+								<button
+									class="w-full rounded-lg py-2 px-4 text-sm bg-gray-100 dark:bg-gray-800 transition hover:bg-gray-200 dark:hover:bg-gray-700 text-left flex justify-between items-center"
+									on:click={getSwarmUIData}
+								>
+									<span>{$i18n.t('Load Available Presets')}</span>
+									<span>&#8635;</span>
+								</button>
+							</div>
+						</div>
+						{#if swarmUIPresets.length > 0}
+							<div class="mt-2 text-sm">
+								<div class="mb-1 text-xs text-gray-500 dark:text-gray-400">
+									{$i18n.t('Select a preset to use as default')}:
+								</div>
+								<div class="max-h-32 overflow-y-auto">
+									<select 
+										class="w-full rounded-lg py-2 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden"
+										bind:value={config.swarmui.SWARMUI_PRESET}
+									>
+										<option value="">{$i18n.t('No default preset')}</option>
+										{#each swarmUIPresets as preset}
+											<option value={preset.id}>{preset.name}</option>
+										{/each}
+									</select>
+								</div>
+							</div>
+						{:else}
+							<div class="mt-2 text-xs text-gray-400 dark:text-gray-500">
+								{$i18n.t('Click to load presets from SwarmUI')}
+							</div>
+						{/if}
 					</div>
 				{:else if config?.engine === 'openai'}
 					<div>
